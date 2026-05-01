@@ -199,6 +199,9 @@ export async function PATCH(
       const paymentId = await generateTransactionId();
       const approvedAt = new Date();
 
+      // Snapshot password BEFORE transaction to detect unexpected changes
+      const passwordBefore = manualPayment.user.password;
+
       // Atomic transaction: all related records written together
       await prisma.$transaction(async (tx) => {
         await tx.manualPayment.update({
@@ -239,6 +242,20 @@ export async function PATCH(
           },
         });
       });
+
+      // Verify pppoe_users.password was NOT changed by the transaction or any DB trigger
+      const userAfterTx = await prisma.pppoeUser.findUnique({
+        where: { id: manualPayment.userId },
+        select: { password: true },
+      });
+      if (userAfterTx && userAfterTx.password !== passwordBefore) {
+        console.error(
+          `[Manual Payment APPROVE] BUG DETECTED: pppoe_users.password changed unexpectedly for user ${manualPayment.user.username}!`,
+          { before_length: passwordBefore.length, after_length: userAfterTx.password.length, userId: manualPayment.userId }
+        );
+      } else {
+        console.log(`[Manual Payment APPROVE] Password integrity OK for ${manualPayment.user.username} (pppoe_users.password unchanged)`);
+      }
 
       // ============================================
       // SYNC RADIUS - Update group + CoA disconnect

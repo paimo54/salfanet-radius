@@ -319,6 +319,7 @@ export default function UserDetailModal({
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       className={`${inputCls} pr-10`}
                       placeholder={t('userModal.passwordPlaceholder')}
+                      autoComplete="new-password"
                     />
                     <button
                       type="button"
