@@ -10,7 +10,6 @@ import { join } from 'path';
 import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
 import { deflateSync } from 'zlib';
-import { tmpdir } from 'os';
 
 const execAsync = promisify(exec);
 
@@ -570,69 +569,34 @@ async function writeProjectToDisk(
 
   let logoConverted = false;
   if (logoPath && existsSync(logoPath)) {
-    // Tier 1: ImageMagick convert
+    // 1) Try sharp (bundled with Next.js — no external dependencies needed)
     try {
-      await execAsync('which convert', { timeout: 3000 });
+      const sharp = (await import('sharp')).default;
+      const logoBuffer = readFileSync(logoPath);
       for (const [density, size] of Object.entries(densitySizes)) {
+        const resized = await sharp(logoBuffer)
+          .resize(size, size, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } })
+          .png()
+          .toBuffer();
         const outPng = join(projectDir, `app/src/main/res/mipmap-${density}/ic_launcher.png`);
-        await execAsync(
-          `convert "${logoPath}" -thumbnail ${size}x${size} -background white -gravity center -extent ${size}x${size} "${outPng}"`,
-          { timeout: 20000 },
-        );
+        writeFileSync(outPng, resized);
         copyFileSync(outPng, join(projectDir, `app/src/main/res/mipmap-${density}/ic_launcher_round.png`));
       }
       logoConverted = true;
-    } catch { /* ImageMagick not available — try next tier */ }
-
-    // Tier 2: Python3 + Pillow (common on Ubuntu VPS) — uses temp file to avoid quoting issues
-    if (!logoConverted) {
+    } catch {
+      // 2) Fallback: ImageMagick
       try {
-        await execAsync('python3 -c "from PIL import Image"', { timeout: 5000 });
-        const pyScriptPath = join(tmpdir(), `salfanet_icon_resize_${Date.now()}.py`);
-        const outputPaths: Record<string, string> = {};
-        for (const density of Object.keys(densitySizes)) {
-          outputPaths[density] = join(projectDir, `app/src/main/res/mipmap-${density}/ic_launcher.png`);
-        }
-        const pyLines: string[] = [
-          'from PIL import Image',
-          `src = r'${logoPath.replace(/\\/g, '/')}'`,
-          'sizes = {',
-          ...Object.entries(densitySizes).map(([d, s]) =>
-            `  '${d}': (${s}, r'${outputPaths[d].replace(/\\/g, '/')}'),`
-          ),
-          '}',
-          'for density, (size, out) in sizes.items():',
-          '    img = Image.open(src).convert("RGBA")',
-          '    bg = Image.new("RGBA", img.size, (255,255,255,255))',
-          '    bg.paste(img, mask=img.split()[3] if img.mode=="RGBA" else None)',
-          '    img = bg.convert("RGB")',
-          '    img.thumbnail((size, size), Image.LANCZOS)',
-          '    final = Image.new("RGB", (size, size), (255,255,255))',
-          '    final.paste(img, ((size-img.width)//2, (size-img.height)//2))',
-          '    final.save(out, "PNG")',
-        ];
-        writeFileSync(pyScriptPath, pyLines.join('\n'));
-        await execAsync(`python3 "${pyScriptPath}"`, { timeout: 60000 });
-        for (const [density, outPng] of Object.entries(outputPaths)) {
+        await execAsync('which convert', { timeout: 3000 });
+        for (const [density, size] of Object.entries(densitySizes)) {
+          const outPng = join(projectDir, `app/src/main/res/mipmap-${density}/ic_launcher.png`);
+          await execAsync(
+            `convert "${logoPath}" -thumbnail ${size}x${size} -background white -gravity center -extent ${size}x${size} "${outPng}"`,
+            { timeout: 20000 },
+          );
           copyFileSync(outPng, join(projectDir, `app/src/main/res/mipmap-${density}/ic_launcher_round.png`));
         }
         logoConverted = true;
-      } catch { /* Pillow not available — try next tier */ }
-    }
-
-    // Tier 3: Direct PNG copy — no resize, Android handles scaling automatically
-    if (!logoConverted) {
-      const ext = logoPath.toLowerCase().split('.').pop() ?? '';
-      if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') {
-        try {
-          const logoBuf = readFileSync(logoPath);
-          for (const density of Object.keys(densitySizes)) {
-            writeFileSync(join(projectDir, `app/src/main/res/mipmap-${density}/ic_launcher.png`), logoBuf);
-            writeFileSync(join(projectDir, `app/src/main/res/mipmap-${density}/ic_launcher_round.png`), logoBuf);
-          }
-          logoConverted = true;
-        } catch { /* fall through to solid color */ }
-      }
+      } catch { /* ImageMagick also unavailable — fall through to solid color */ }
     }
   }
 
