@@ -6,6 +6,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.25.16] — 2026-05-02
+
+### Added
+- **Notifikasi WhatsApp ke admin saat pembayaran manual baru masuk** — Saat pelanggan mengirim bukti pembayaran manual (upload transfer) yang perlu di-approve, sistem sekarang mengirim notifikasi WhatsApp instan ke admin. Pesan berisi nama pelanggan, username, nomor invoice, jumlah bayar, info bank pengirim, dan link langsung ke halaman approval. Sebelumnya hanya membuat record notifikasi di database tanpa WA.
+- **Notifikasi WhatsApp ke semua SUPER_ADMIN** — Notifikasi WA untuk pendaftaran pelanggan baru dan pembayaran manual kini dikirim ke **semua** admin, bukan hanya ke satu nomor `company.adminPhone`. Sistem mengumpulkan nomor dari 2 sumber:
+  1. `companies.adminPhone` — nomor utama di Pengaturan Perusahaan
+  2. `admin_users` dengan role `SUPER_ADMIN`, status aktif, dan field `phone` terisi
+
+  Nomor duplikat otomatis di-deduplikasi. Pengiriman dilakukan paralel (fire-and-forget) sehingga tidak memperlambat response API.
+- **Helper function `notifyAdminsViaWhatsApp()`** — Fungsi reusable di `whatsapp-templates.service.ts` untuk mengirim pesan WA ke semua admin. Dapat digunakan di endpoint lain yang membutuhkan notifikasi admin.
+- **Helper function `getAdminPhones()`** — Fungsi yang mengumpulkan dan mendeduplikasi semua nomor HP admin dari database. Memfilter nomor invalid (< 10 digit).
+
+### Files
+- `src/server/services/notifications/whatsapp-templates.service.ts` — Tambah `getAdminPhones()` + `notifyAdminsViaWhatsApp()`
+- `src/app/api/manual-payments/route.ts` — Tambah notifikasi WA ke semua admin saat POST (pembayaran manual baru)
+- `src/app/api/registrations/route.ts` — Ubah notifikasi WA dari hanya `adminPhone` ke semua admin via `notifyAdminsViaWhatsApp()`
+
+---
+
 ## [2.25.15] — 2026-05-01
 
 ### Fixed

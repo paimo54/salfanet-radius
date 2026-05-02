@@ -55,6 +55,67 @@ async function getTemplate(type: string): Promise<string | null> {
 }
 
 /**
+ * Get all admin phone numbers for notifications.
+ * Collects from:
+ * 1. company.adminPhone (main admin phone in company settings)
+ * 2. All admin_users with role SUPER_ADMIN who have a phone number
+ * Returns deduplicated list of phone numbers.
+ */
+export async function getAdminPhones(): Promise<string[]> {
+  try {
+    const [company, superAdmins] = await Promise.all([
+      prisma.company.findFirst({ select: { adminPhone: true } }),
+      prisma.adminUser.findMany({
+        where: {
+          role: 'SUPER_ADMIN',
+          isActive: true,
+          phone: { not: null },
+        },
+        select: { phone: true },
+      }),
+    ]);
+
+    const phones = new Set<string>();
+
+    if (company?.adminPhone) {
+      phones.add(company.adminPhone.replace(/[^0-9]/g, ''));
+    }
+
+    for (const admin of superAdmins) {
+      if (admin.phone) {
+        phones.add(admin.phone.replace(/[^0-9]/g, ''));
+      }
+    }
+
+    return Array.from(phones).filter((p) => p.length >= 10);
+  } catch (error) {
+    console.error('[WA] Failed to get admin phones:', error);
+    return [];
+  }
+}
+
+/**
+ * Send a WhatsApp message to ALL admin phones (company admin + all SUPER_ADMINs).
+ * Fire-and-forget: errors are silently caught per-recipient.
+ */
+export async function notifyAdminsViaWhatsApp(message: string): Promise<void> {
+  try {
+    const phones = await getAdminPhones();
+    if (phones.length === 0) return;
+
+    await Promise.allSettled(
+      phones.map((phone) =>
+        WhatsAppService.sendMessage({ phone, message })
+          .then(() => console.log(`[WA] ✅ Admin notification sent to ${phone}`))
+          .catch(() => { /* intentionally silent per-recipient */ })
+      )
+    );
+  } catch (_) {
+    /* intentionally silent */
+  }
+}
+
+/**
  * Send registration confirmation to customer upon form submission
  * Notifies the customer that their registration is received and pending review
  */

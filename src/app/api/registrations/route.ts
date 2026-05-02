@@ -1,7 +1,6 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/server/db/client';
-import { WhatsAppService } from '@/server/services/notifications/whatsapp.service';
-import { sendRegistrationConfirmation } from '@/server/services/notifications/whatsapp-templates.service';
+import { sendRegistrationConfirmation, notifyAdminsViaWhatsApp } from '@/server/services/notifications/whatsapp-templates.service';
 
 export async function POST(request: NextRequest) {
   try {
@@ -75,23 +74,20 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Notify admin via WhatsApp (fire-and-forget)
+    // Notify all admins (company adminPhone + all SUPER_ADMINs) via WhatsApp (fire-and-forget)
     prisma.company.findFirst({
-      select: { adminPhone: true, name: true, baseUrl: true },
+      select: { baseUrl: true },
     }).then(async (company) => {
-      if (!company?.adminPhone) return;
-      try {
-        const refInfo = validReferralCode ? `\n🎁 Kode Referral: *${validReferralCode}*` : '';
-        const adminUrl = `${company.baseUrl || ''}/admin/pppoe/registrations`;
-        const message =
-          `📋 *Pendaftaran Baru Masuk!*\n\n` +
-          `👤 Nama: *${name}*\n` +
-          `📞 HP: *${phone}*\n` +
-          `📦 Paket: *${registration.profile.name}*\n` +
-          `📍 Alamat: ${address}${refInfo}\n\n` +
-          `Silakan buka panel admin untuk menyetujui:\n${adminUrl}`;
-        await WhatsAppService.sendMessage({ phone: company.adminPhone, message });
-      } catch (_) { /* intentionally silent */ }
+      const refInfo = validReferralCode ? `\n🎁 Kode Referral: *${validReferralCode}*` : '';
+      const adminUrl = `${company?.baseUrl || ''}/admin/pppoe/registrations`;
+      const message =
+        `📋 *Pendaftaran Baru Masuk!*\n\n` +
+        `👤 Nama: *${name}*\n` +
+        `📞 HP: *${phone}*\n` +
+        `📦 Paket: *${registration.profile.name}*\n` +
+        `📍 Alamat: ${address}${refInfo}\n\n` +
+        `Silakan buka panel admin untuk menyetujui:\n${adminUrl}`;
+      await notifyAdminsViaWhatsApp(message);
     }).catch(() => {});
 
     // Send customer WA confirmation using DB template (fire-and-forget)

@@ -1,8 +1,9 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/server/db/client';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/server/auth/config';
 import { startOfDayWIBtoUTC, endOfDayWIBtoUTC, nowWIB } from '@/lib/timezone';
+import { notifyAdminsViaWhatsApp } from '@/server/services/notifications/whatsapp-templates.service';
 
 // GET - Get all manual payment submissions
 export async function GET(request: NextRequest) {
@@ -174,6 +175,22 @@ export async function POST(request: NextRequest) {
         createdAt: nowWIB(),
       },
     });
+
+    // Notify all admins (company adminPhone + all SUPER_ADMINs) via WhatsApp (fire-and-forget)
+    const amountFormatted = `Rp ${parseFloat(amount).toLocaleString('id-ID')}`;
+    prisma.company.findFirst({
+      select: { baseUrl: true },
+    }).then(async (company) => {
+      const adminUrl = `${company?.baseUrl || ''}/admin/manual-payments`;
+      const message =
+        `💰 *Pembayaran Manual Baru!*\n\n` +
+        `👤 Pelanggan: *${manualPayment.user.name}* (${manualPayment.user.username})\n` +
+        `📄 Invoice: *${manualPayment.invoice.invoiceNumber}*\n` +
+        `💵 Jumlah: *${amountFormatted}*\n` +
+        `🏦 Bank: ${bankName}${accountName ? ` - ${accountName}` : ''}\n\n` +
+        `Silakan buka panel admin untuk menyetujui:\n${adminUrl}`;
+      await notifyAdminsViaWhatsApp(message);
+    }).catch(() => {});
     
     return NextResponse.json({
       success: true,
